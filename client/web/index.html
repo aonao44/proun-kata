@@ -1,0 +1,648 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <title>発音カタクナ解析クライアント</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        font-family: "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        margin: 0;
+        padding: 2rem 1rem 3rem;
+        background: #f9fafb;
+        color: #111827;
+        line-height: 1.6;
+      }
+      @media (prefers-color-scheme: dark) {
+        body { background: #0f172a; color: #e5e7eb; }
+      }
+      h1 { text-align: center; font-size: 2rem; margin-bottom: 2rem; }
+      .layout { max-width: 1100px; margin: 0 auto; display: grid; gap: 2rem; }
+      .cards { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+      .card {
+        background: rgba(255, 255, 255, 0.92);
+        border-radius: 1.2rem;
+        padding: 1.75rem;
+        box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+      }
+      @media (prefers-color-scheme: dark) {
+        .card { background: rgba(15, 23, 42, 0.75); box-shadow: 0 25px 60px rgba(2, 6, 23, 0.55); }
+      }
+      .card h2 { margin: 0; font-size: 1.4rem; }
+      .drop-zone {
+        border: 2px dashed rgba(37, 99, 235, 0.5);
+        border-radius: 1rem;
+        padding: 2.5rem 1.5rem;
+        text-align: center;
+        color: #2563eb;
+        background: rgba(37, 99, 235, 0.06);
+        transition: border 0.2s ease, background 0.2s ease, transform 0.2s ease;
+      }
+      .drop-zone.dragover {
+        border-color: #1d4ed8;
+        background: rgba(37, 99, 235, 0.1);
+        transform: translateY(-4px);
+      }
+      @media (prefers-color-scheme: dark) {
+        .drop-zone { color: #93c5fd; border-color: rgba(147, 197, 253, 0.5); background: rgba(37, 99, 235, 0.15); }
+        .drop-zone.dragover { border-color: #bfdbfe; background: rgba(59, 130, 246, 0.25); }
+      }
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        padding: 0.7rem 1.6rem;
+        border-radius: 999px;
+        border: none;
+        background: #2563eb;
+        color: #f8fafc;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.2s ease;
+      }
+      .button:hover { transform: translateY(-1px); box-shadow: 0 12px 25px rgba(37, 99, 235, 0.25); }
+      .button:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; transform: none; }
+      .button:focus-visible { outline: 3px solid #60a5fa; outline-offset: 3px; }
+      .button-secondary { background: #1f2937; }
+      .button-secondary:hover { background: #111827; }
+      @media (prefers-color-scheme: dark) {
+        .button { background: #3b82f6; color: #0f172a; }
+        .button-secondary { background: #e5e7eb; color: #111827; }
+      }
+      .file-selected { font-size: 0.95rem; color: #64748b; }
+      @media (prefers-color-scheme: dark) { .file-selected { color: #cbd5f5; } }
+      .status-line { min-height: 1.4rem; font-weight: 600; color: #2563eb; }
+      @media (prefers-color-scheme: dark) { .status-line { color: #60a5fa; } }
+      .alert {
+        display: none;
+        padding: 0.9rem 1.1rem;
+        border-radius: 0.9rem;
+        border: 1px solid #f87171;
+        background: #fee2e2;
+        color: #7f1d1d;
+      }
+      .alert.show { display: block; }
+      @media (prefers-color-scheme: dark) {
+        .alert { background: rgba(254, 202, 202, 0.15); border-color: #fca5a5; color: #fecaca; }
+      }
+      .spinner {
+        width: 1.05rem;
+        height: 1.05rem;
+        border-radius: 50%;
+        border: 2px solid rgba(59, 130, 246, 0.3);
+        border-top-color: #2563eb;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .analyze-indicator { display: inline-flex; align-items: center; gap: 0.6rem; color: #2563eb; font-weight: 600; }
+      .analyze-indicator.hidden { display: none; }
+      .audio-controls { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+      .record-button.recording { background: #dc2626; color: #fef2f2; }
+      .record-dot {
+        width: 0.65rem;
+        height: 0.65rem;
+        border-radius: 50%;
+        background: rgba(254, 226, 226, 0.6);
+        display: inline-block;
+        margin-right: 0.35rem;
+        animation: blink 1s ease-in-out infinite;
+      }
+      .timer { font-variant-numeric: tabular-nums; font-weight: 600; color: #dc2626; }
+      .timer.hidden { display: none; }
+      @keyframes blink { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+      @media (prefers-color-scheme: dark) { .record-button.recording { background: #ef4444; color: #fee2e2; } .timer { color: #f87171; } }
+      audio { width: 100%; margin-top: 0.5rem; }
+      details.settings { border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 0.9rem; padding: 0.8rem 1rem; background: rgba(248, 250, 252, 0.6); }
+      details.settings[open] { background: rgba(219, 234, 254, 0.55); }
+      details.settings summary { cursor: pointer; font-weight: 600; color: #1d4ed8; }
+      @media (prefers-color-scheme: dark) {
+        details.settings { border-color: rgba(148, 163, 184, 0.2); background: rgba(30, 41, 59, 0.6); }
+        details.settings[open] { background: rgba(37, 99, 235, 0.25); }
+        details.settings summary { color: #93c5fd; }
+      }
+      .settings-body { display: grid; gap: 1rem; margin-top: 1rem; max-width: 420px; }
+      label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.95rem; color: #475569; }
+      label select { padding: 0.4rem 0.6rem; border-radius: 0.6rem; border: 1px solid #cbd5f5; background: #fff; color: inherit; }
+      @media (prefers-color-scheme: dark) {
+        label { color: #cbd5f5; }
+        label select { border-color: #334155; background: #1f2937; color: #e2e8f0; }
+      }
+      .results {
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 1.2rem;
+        padding: 2rem;
+        box-shadow: 0 20px 55px rgba(15, 23, 42, 0.16);
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+      @media (prefers-color-scheme: dark) {
+        .results { background: rgba(17, 24, 39, 0.85); box-shadow: 0 32px 70px rgba(2, 6, 23, 0.6); }
+      }
+      .kana-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+      .kana-text { font-size: 1.9rem; font-weight: 700; letter-spacing: 0.1em; word-break: break-word; }
+      .table-grid { display: grid; gap: 1.2rem; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+      .table-wrapper { display: flex; flex-direction: column; gap: 0.5rem; }
+      .table-wrapper h3 { margin: 0; font-size: 1.05rem; color: #1f2937; }
+      @media (prefers-color-scheme: dark) { .table-wrapper h3 { color: #e2e8f0; } }
+      .scroll-table { max-height: 260px; overflow: auto; border-radius: 0.9rem; border: 1px solid rgba(148, 163, 184, 0.3); background: rgba(248, 250, 252, 0.7); }
+      @media (prefers-color-scheme: dark) { .scroll-table { border-color: rgba(148, 163, 184, 0.2); background: rgba(30, 41, 59, 0.6); } }
+      table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+      thead { position: sticky; top: 0; background: rgba(37, 99, 235, 0.1); backdrop-filter: blur(6px); }
+      thead th { text-align: left; padding: 0.6rem 0.75rem; color: #1f2937; }
+      @media (prefers-color-scheme: dark) { thead { background: rgba(59, 130, 246, 0.25); } thead th { color: #e2e8f0; } }
+      tbody td { padding: 0.55rem 0.75rem; border-top: 1px solid rgba(148, 163, 184, 0.25); }
+      tbody tr:nth-child(even) { background: rgba(148, 163, 184, 0.15); }
+      @media (prefers-color-scheme: dark) { tbody tr:nth-child(even) { background: rgba(51, 65, 85, 0.45); } }
+      .empty-cell { text-align: center; padding: 1rem 0; font-style: italic; color: #64748b; }
+      @media (prefers-color-scheme: dark) { .empty-cell { color: #cbd5f5; } }
+      details.raw { border: 1px solid rgba(148, 163, 184, 0.35); border-radius: 1rem; padding: 0.9rem 1.1rem; background: rgba(241, 245, 249, 0.7); }
+      details.raw summary { font-weight: 600; cursor: pointer; color: #1d4ed8; }
+      details.raw[open] { background: rgba(219, 234, 254, 0.6); }
+      @media (prefers-color-scheme: dark) {
+        details.raw { border-color: rgba(148, 163, 184, 0.2); background: rgba(30, 41, 59, 0.65); }
+        details.raw[open] { background: rgba(37, 99, 235, 0.22); }
+        details.raw summary { color: #93c5fd; }
+      }
+      pre { margin-top: 0.8rem; background: #2b2b2b; color: #eaeaea; padding: 1rem 1.2rem; border-radius: 0.8rem; overflow-x: auto; }
+      .toast {
+        position: fixed;
+        left: 50%;
+        bottom: 2.5rem;
+        transform: translateX(-50%);
+        background: rgba(20, 184, 166, 0.95);
+        color: #ecfdf5;
+        padding: 0.8rem 1.4rem;
+        border-radius: 999px;
+        font-weight: 600;
+        box-shadow: 0 18px 40px rgba(13, 148, 136, 0.35);
+        display: none;
+      }
+      @media (prefers-color-scheme: dark) { .toast { background: rgba(45, 212, 191, 0.9); color: #0f172a; } }
+      .toast.show { display: block; }
+      .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    </style>
+  </head>
+  <body>
+    <h1>発音カタカナ解析ツール</h1>
+
+    <div class="layout">
+      <div class="cards">
+        <section class="card" aria-labelledby="file-card-title">
+          <h2 id="file-card-title">ファイルを解析</h2>
+          <p>webm / mp4 / mp3 / wav の音声ファイルをドラッグ＆ドロップするか、ボタンから選択してください。</p>
+          <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="音声ファイルをドラッグまたはクリックして選択">
+            ここに音声ファイルをドロップ
+          </div>
+          <input id="file-input" type="file" accept="audio/webm,audio/mp4,audio/mpeg,audio/wav" hidden>
+          <div>
+            <button id="file-select" type="button" class="button-secondary button">ファイルを選ぶ</button>
+          </div>
+          <div id="file-selected" class="file-selected">選択されたファイルはありません</div>
+          <div class="audio-controls">
+            <button id="file-analyze" type="button" class="button" aria-busy="false">解析する</button>
+            <span id="file-indicator" class="analyze-indicator hidden"><span class="spinner" aria-hidden="true"></span><span>解析中…</span></span>
+          </div>
+        </section>
+
+        <section class="card" aria-labelledby="record-card-title">
+          <h2 id="record-card-title">その場で録音して解析</h2>
+          <p>Record → Stop → 解析する の順に押すだけで、マイク入力をカタカナ表記に変換します。</p>
+          <div class="audio-controls" role="group" aria-label="録音操作">
+            <button id="record" type="button" class="button button-secondary record-button">録音する</button>
+            <button id="stop" type="button" class="button-secondary button" disabled>停止する</button>
+            <span id="record-timer" class="timer hidden" aria-live="off">00:00</span>
+          </div>
+          <audio id="playback" controls aria-label="録音した音声" ></audio>
+          <div class="audio-controls">
+            <button id="record-analyze" type="button" class="button" aria-busy="false" disabled>解析する</button>
+            <span id="record-indicator" class="analyze-indicator hidden"><span class="spinner" aria-hidden="true"></span><span>解析中…</span></span>
+          </div>
+        </section>
+      </div>
+
+      <details class="settings" id="settings-panel">
+        <summary>詳細設定（オプション）</summary>
+        <div class="settings-body">
+          <label>かなスタイル
+            <select id="style">
+              <option value="rough">rough（そのまま）</option>
+              <option value="loan">loan（外来語風）</option>
+            </select>
+          </label>
+          <label>語末の子音
+            <select id="final_c_t">
+              <option value="xtsu">xtsu（ッで終わる）</option>
+              <option value="tsu">tsu（ツで終わる）</option>
+            </select>
+          </label>
+          <label>TH の扱い
+            <select id="th">
+              <option value="su">su（ス）</option>
+              <option value="zu">zu（ズ）</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <div id="alert" class="alert" role="alert"></div>
+
+      <div class="results" aria-live="polite">
+        <div class="kana-row">
+          <div id="kana-text" class="kana-text">kana_text がここに表示されます</div>
+          <button id="copy-kana" type="button" class="button" disabled>コピー</button>
+        </div>
+        <div class="table-grid">
+          <div class="table-wrapper">
+            <h3>Phones</h3>
+            <div class="scroll-table">
+              <table aria-describedby="phones-desc">
+                <thead><tr><th scope="col">p</th><th scope="col">start</th><th scope="col">end</th><th scope="col">conf</th></tr></thead>
+                <tbody id="phones-body"><tr><td colspan="4" class="empty-cell">データがありません</td></tr></tbody>
+              </table>
+            </div>
+            <p id="phones-desc" class="sr-only">音素とタイムスタンプ、信頼度の一覧</p>
+          </div>
+          <div class="table-wrapper">
+            <h3>Kana</h3>
+            <div class="scroll-table">
+              <table aria-describedby="kana-desc">
+                <thead><tr><th scope="col">k</th><th scope="col">start</th><th scope="col">end</th></tr></thead>
+                <tbody id="kana-body"><tr><td colspan="3" class="empty-cell">データがありません</td></tr></tbody>
+              </table>
+            </div>
+            <p id="kana-desc" class="sr-only">かな記号とタイムスタンプの一覧</p>
+          </div>
+        </div>
+        <details class="raw" id="raw-details">
+          <summary>Raw JSON</summary>
+          <pre id="raw-json">{}</pre>
+        </details>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script>
+      const API_ENDPOINT = 'http://127.0.0.1:8000/transcribe_phonetic_any';
+
+      const dropZone = document.getElementById('drop-zone');
+      const fileInput = document.getElementById('file-input');
+      const fileSelectBtn = document.getElementById('file-select');
+      const fileSelectedText = document.getElementById('file-selected');
+      const fileAnalyzeBtn = document.getElementById('file-analyze');
+      const fileIndicator = document.getElementById('file-indicator');
+
+      const recordBtn = document.getElementById('record');
+      const stopBtn = document.getElementById('stop');
+      const recordAnalyzeBtn = document.getElementById('record-analyze');
+      const recordIndicator = document.getElementById('record-indicator');
+      const timerEl = document.getElementById('record-timer');
+      const playbackEl = document.getElementById('playback');
+
+      const styleSelect = document.getElementById('style');
+      const finalSelect = document.getElementById('final_c_t');
+      const thSelect = document.getElementById('th');
+
+      const alertBox = document.getElementById('alert');
+      const kanaTextEl = document.getElementById('kana-text');
+      const copyButton = document.getElementById('copy-kana');
+      const phonesBody = document.getElementById('phones-body');
+      const kanaBody = document.getElementById('kana-body');
+      const rawDetails = document.getElementById('raw-details');
+      const rawJsonEl = document.getElementById('raw-json');
+      const toastEl = document.getElementById('toast');
+
+      let toastTimer = null;
+      let selectedFile = null;
+      let recordedBlob = null;
+      let mediaRecorder = null;
+      let recordingStream = null;
+      let recordingChunks = [];
+      let recordingTimer = null;
+      let recordingStartedAt = null;
+
+      const state = {
+        analyzing: false,
+        analyzingSource: null,
+        recording: false,
+      };
+
+      function setAnalyzing(source, value) {
+        state.analyzing = value;
+        state.analyzingSource = value ? source : null;
+
+        fileAnalyzeBtn.disabled = value || !selectedFile;
+        recordAnalyzeBtn.disabled = value || !recordedBlob;
+        recordBtn.disabled = value;
+        stopBtn.disabled = value || !state.recording;
+
+        fileAnalyzeBtn.setAttribute('aria-busy', value && source === 'file' ? 'true' : 'false');
+        recordAnalyzeBtn.setAttribute('aria-busy', value && source === 'record' ? 'true' : 'false');
+
+        fileIndicator.classList.toggle('hidden', !(value && source === 'file'));
+        recordIndicator.classList.toggle('hidden', !(value && source === 'record'));
+      }
+
+      function showAlert(message) {
+        alertBox.textContent = message;
+        alertBox.classList.add('show');
+      }
+
+      function clearAlert() {
+        alertBox.textContent = '';
+        alertBox.classList.remove('show');
+      }
+
+      function showToast(message) {
+        toastEl.textContent = message;
+        toastEl.classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2000);
+      }
+
+      function handleFileSelection(file) {
+        selectedFile = file;
+        if (file) {
+          fileSelectedText.textContent = `選択中: ${file.name}`;
+          fileAnalyzeBtn.disabled = false;
+        } else {
+          fileSelectedText.textContent = '選択されたファイルはありません';
+          fileAnalyzeBtn.disabled = true;
+        }
+      }
+
+      dropZone.addEventListener('click', () => fileInput.click());
+      dropZone.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          fileInput.click();
+        }
+      });
+      ['dragenter', 'dragover'].forEach((eventName) => {
+        dropZone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropZone.classList.add('dragover');
+        });
+      });
+      ['dragleave', 'drop'].forEach((eventName) => {
+        dropZone.addEventListener(eventName, (event) => {
+          event.preventDefault();
+          dropZone.classList.remove('dragover');
+        });
+      });
+      dropZone.addEventListener('drop', (event) => {
+        const file = event.dataTransfer?.files?.[0];
+        if (file) {
+          handleFileSelection(file);
+        }
+      });
+      fileInput.addEventListener('change', () => {
+        const file = fileInput.files?.[0] || null;
+        handleFileSelection(file);
+      });
+      fileSelectBtn.addEventListener('click', () => fileInput.click());
+
+      function formatSeconds(seconds) {
+        const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+        const secs = (seconds % 60).toString().padStart(2, '0');
+        return `${mins}:${secs}`;
+      }
+
+      function startTimer() {
+        recordingStartedAt = Date.now();
+        timerEl.textContent = '00:00';
+        timerEl.classList.remove('hidden');
+        recordingTimer = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - recordingStartedAt) / 1000);
+          timerEl.textContent = formatSeconds(elapsed);
+        }, 1000);
+      }
+
+      function stopTimer() {
+        clearInterval(recordingTimer);
+        recordingTimer = null;
+        timerEl.classList.add('hidden');
+        timerEl.textContent = '00:00';
+      }
+
+      function resetRecording() {
+        state.recording = false;
+        stopTimer();
+        recordBtn.textContent = '録音する';
+        recordBtn.classList.remove('recording');
+        recordBtn.disabled = state.analyzing;
+        stopBtn.disabled = true;
+        if (recordingStream) {
+          recordingStream.getTracks().forEach((track) => track.stop());
+          recordingStream = null;
+        }
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          try { mediaRecorder.stop(); } catch (error) { /* noop */ }
+        }
+      }
+
+      recordBtn.addEventListener('click', async () => {
+        if (!window.MediaRecorder) {
+          showAlert('このブラウザは録音に対応していません。Chrome か Firefox をご利用ください。');
+          return;
+        }
+        if (state.analyzing) {
+          return;
+        }
+        if (state.recording) {
+          return;
+        }
+        try {
+          recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+            : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+            : undefined;
+          recordingChunks = [];
+          recordedBlob = null;
+          recordAnalyzeBtn.disabled = true;
+          mediaRecorder = mimeType ? new MediaRecorder(recordingStream, { mimeType }) : new MediaRecorder(recordingStream);
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data && event.data.size > 0) {
+              recordingChunks.push(event.data);
+            }
+          };
+          mediaRecorder.onerror = (event) => {
+            showAlert(`録音エラー: ${event.error?.message || '不明なエラー'}`);
+            resetRecording();
+          };
+          mediaRecorder.onstop = () => {
+            if (recordingStream) {
+              recordingStream.getTracks().forEach((track) => track.stop());
+              recordingStream = null;
+            }
+            try {
+              recordedBlob = new Blob(recordingChunks, { type: mediaRecorder?.mimeType || 'audio/webm' });
+            } catch (error) {
+              recordedBlob = new Blob(recordingChunks);
+            }
+            if (recordedBlob && recordedBlob.size > 0) {
+              const url = URL.createObjectURL(recordedBlob);
+              playbackEl.src = url;
+              recordAnalyzeBtn.disabled = false;
+              showToast('録音が完了しました');
+            } else {
+              showAlert('録音されたデータが空でした。もう一度お試しください。');
+              recordAnalyzeBtn.disabled = true;
+            }
+          };
+          mediaRecorder.start();
+          state.recording = true;
+          recordBtn.textContent = '録音中…';
+          recordBtn.classList.add('recording');
+          stopBtn.disabled = false;
+          startTimer();
+          clearAlert();
+        } catch (error) {
+          showAlert(`録音を開始できませんでした: ${error.message}`);
+          resetRecording();
+        }
+      });
+
+      stopBtn.addEventListener('click', () => {
+        if (!state.recording) {
+          showAlert('録音してから停止してください。');
+          return;
+        }
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+          mediaRecorder.stop();
+        }
+        resetRecording();
+      });
+
+      async function analyzeBlob(blob, filename, source) {
+        if (!blob) {
+          showAlert('解析する音声データがありません。');
+          return;
+        }
+        const formData = new FormData();
+        formData.append('audio', blob, filename);
+        formData.append('style', styleSelect.value);
+        formData.append('final_c_t', finalSelect.value);
+        formData.append('th', thSelect.value);
+        clearAlert();
+        setAnalyzing(source, true);
+        try {
+          const response = await fetch(API_ENDPOINT, { method: 'POST', body: formData });
+          if (!response.ok) {
+            const detail = await response.text();
+            throw new Error(detail || `HTTP ${response.status}`);
+          }
+          const payload = await response.json();
+          renderResult(payload);
+          showToast('解析が完了しました');
+        } catch (error) {
+          showAlert(`解析に失敗しました: ${error.message}`);
+        } finally {
+          setAnalyzing(source, false);
+        }
+      }
+
+      fileAnalyzeBtn.addEventListener('click', () => {
+        if (!selectedFile || state.analyzing) {
+          if (!selectedFile) { showAlert('先に音声ファイルを選択してください。'); }
+          return;
+        }
+        analyzeBlob(selectedFile, selectedFile.name || 'upload.wav', 'file');
+      });
+
+      recordAnalyzeBtn.addEventListener('click', () => {
+        if (!recordedBlob || state.analyzing) {
+          if (!recordedBlob) { showAlert('録音してから解析してください。'); }
+          return;
+        }
+        analyzeBlob(recordedBlob, 'recording.webm', 'record');
+      });
+
+      function renderResult(payload) {
+        const kanaText = typeof payload?.kana_text === 'string' ? payload.kana_text : '';
+        kanaTextEl.textContent = kanaText || 'kana_text がここに表示されます';
+        copyButton.disabled = kanaText.length === 0;
+        copyButton.setAttribute('aria-disabled', String(copyButton.disabled));
+
+        renderTable(phonesBody, Array.isArray(payload?.phones) ? payload.phones : [], [
+          { key: 'symbol', digits: null },
+          { key: 'start', digits: 2 },
+          { key: 'end', digits: 2 },
+          { key: 'confidence', digits: 2 },
+        ]);
+        renderTable(kanaBody, Array.isArray(payload?.kana) ? payload.kana : [], [
+          { key: 'kana', digits: null },
+          { key: 'start', digits: 2 },
+          { key: 'end', digits: 2 },
+        ]);
+
+        try {
+          rawJsonEl.textContent = JSON.stringify(payload ?? {}, null, 2);
+        } catch (error) {
+          rawJsonEl.textContent = '{}';
+        }
+        if (rawDetails.hasAttribute('open')) {
+          rawDetails.removeAttribute('open');
+        }
+      }
+
+      function renderTable(tbody, data, columns) {
+        tbody.textContent = '';
+        if (!data.length) {
+          const row = document.createElement('tr');
+          const cell = document.createElement('td');
+          cell.colSpan = columns.length;
+          cell.textContent = 'データがありません';
+          cell.className = 'empty-cell';
+          row.appendChild(cell);
+          tbody.appendChild(row);
+          return;
+        }
+        for (const entry of data) {
+          const row = document.createElement('tr');
+          for (const column of columns) {
+            const value = entry?.[column.key];
+            const cell = document.createElement('td');
+            if (typeof value === 'number' && column.digits !== null) {
+              cell.textContent = Number.isFinite(value) ? value.toFixed(column.digits) : '';
+            } else {
+              cell.textContent = value ?? '';
+            }
+            row.appendChild(cell);
+          }
+          tbody.appendChild(row);
+        }
+      }
+
+      copyButton.addEventListener('click', async () => {
+        if (copyButton.disabled) {
+          return;
+        }
+        const text = kanaTextEl.textContent || '';
+        try {
+          if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            showToast('コピーしました');
+          } else {
+            throw new Error('クリップボード API を利用できません');
+          }
+        } catch (error) {
+          showAlert(`コピーに失敗しました: ${error.message}`);
+        }
+      });
+
+      // 初期状態
+      fileAnalyzeBtn.disabled = true;
+      recordAnalyzeBtn.disabled = true;
+      timerEl.classList.add('hidden');
+      setAnalyzing(null, false);
+    </script>
+  </body>
+</html>
