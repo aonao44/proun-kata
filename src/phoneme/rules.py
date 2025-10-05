@@ -1,7 +1,8 @@
 """Rule-based mapping from phoneme symbols to kana tokens."""
+
 from __future__ import annotations
 
-from typing import Iterable
+from collections.abc import Iterable
 
 PROMPT_VOWELS = {"EY", "AY", "OW", "OY", "AW"}
 SILENCE_LABELS = {"SIL", "SP", "NSN"}

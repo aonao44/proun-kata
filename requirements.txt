@@ -12,3 +12,4 @@ torch>=2.2
 torchaudio>=2.2
 soundfile>=0.12
 numpy>=1.26
+pydantic-settings>=2.1

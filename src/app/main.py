@@ -1,4 +1,5 @@
 """FastAPI entrypoint for the phonetic transcription service."""
+
 from __future__ import annotations
 
 import asyncio
@@ -91,7 +92,10 @@ async def transcribe_phonetic(
         # Pipeline handles ONLY raw audio -> phonemes. Do not pass rendering flags here.
         decoded = await pipeline.transcribe(payload)
     except NotImplementedError as exc:
-        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
 
     enriched = _apply_kana(
         decoded,
@@ -131,12 +135,18 @@ async def transcribe_phonetic_any(
             content_type=audio.content_type,
         )
     except TranscodeError as exc:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
 
     try:
         decoded = await pipeline.transcribe(wav_bytes)
     except NotImplementedError as exc:
-        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(exc),
+        ) from exc
 
     enriched = _apply_kana(
         decoded,
@@ -169,7 +179,12 @@ def _apply_kana(
 
 def _to_response(result: PhonemeResult) -> PhoneticTranscriptionResponse:
     phones = [
-        PhonemeSpan(symbol=phone.symbol, start=phone.start, end=phone.end, confidence=phone.confidence)
+        PhonemeSpan(
+            symbol=phone.symbol,
+            start=phone.start,
+            end=phone.end,
+            confidence=phone.confidence,
+        )
         for phone in result.phones
     ]
     kana = [
@@ -233,7 +248,7 @@ def _transcode_audio_to_wav(
             str(target_path),
         ]
         try:
-            subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(command, check=True, capture_output=True)
         except FileNotFoundError as exc:
             raise TranscodeError("ffmpeg not found") from exc
         except subprocess.CalledProcessError as exc:

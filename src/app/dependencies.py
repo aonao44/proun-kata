@@ -1,4 +1,5 @@
 """Application-level dependency wiring."""
+
 from functools import lru_cache
 
 from phoneme.pipeline import PhonemePipeline
