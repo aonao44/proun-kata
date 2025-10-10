@@ -1,6 +1,7 @@
 """wav2vec2 CTC を用いた音素推定パイプライン。"""
 from __future__ import annotations
 
+import threading
 import time
 import torch
 from transformers import AutoModelForCTC, AutoProcessor
@@ -32,6 +33,7 @@ class Wav2Vec2Pipeline(PhonemePipeline):
         self._min_phone_ms = min_phone_ms
         self._components: tuple[AutoProcessor, AutoModelForCTC, torch.device] | None = None
         self._cold_start_ms: float | None = None
+        self._load_lock = threading.Lock()
 
     async def transcribe(self, audio_bytes: bytes, *, req_id: str) -> tuple[list[PhonemeSpan], TranscriptionMetrics]:
         if not audio_bytes:
@@ -47,9 +49,14 @@ class Wav2Vec2Pipeline(PhonemePipeline):
 
         waveform, sample_rate = ensure_sample_rate(waveform, sample_rate)
         if waveform.dim() > 1:
-            waveform = waveform.squeeze(0)
+            waveform = waveform.mean(dim=0)
+        waveform = waveform.to(torch.float32)
+        peak = waveform.abs().max()
+        if torch.isfinite(peak) and peak > 0:
+            waveform = waveform / peak
+        waveform = waveform.clamp(-1.0, 1.0).contiguous()
 
-        processor, model, device = self._ensure_ready()
+        processor, model, device = self.ensure_ready()
         blank_id = processor.tokenizer.pad_token_id
         if blank_id is None and getattr(processor.tokenizer, 'pad_token', None) is not None:
             blank_id = processor.tokenizer.convert_tokens_to_ids(processor.tokenizer.pad_token)
@@ -158,6 +165,72 @@ class Wav2Vec2Pipeline(PhonemePipeline):
         )
         return phones, metrics
 
+    def _ensure_ready(self) -> tuple[AutoProcessor, AutoModelForCTC, torch.device]:
+        if self._components is not None:
+            return self._components
+
+        with self._load_lock:
+            if self._components is not None:
+                return self._components
+
+            device = self._resolve_device()
+            load_start_cpu = time.perf_counter()
+            load_event_start = torch.cuda.Event(enable_timing=True) if device.type == "cuda" else None
+            load_event_end = torch.cuda.Event(enable_timing=True) if device.type == "cuda" else None
+            if load_event_start is not None and load_event_end is not None:
+                load_event_start.record()
+
+            revision = (self._revision or "").strip()
+            use_revision = bool(revision and revision.upper() != "REPLACE_WITH_COMMIT_SHA")
+            processor = (
+                AutoProcessor.from_pretrained(self._model_id, revision=revision)
+                if use_revision
+                else AutoProcessor.from_pretrained(self._model_id)
+            )
+            feature_extractor = getattr(processor, "feature_extractor", None)
+            if feature_extractor is not None:
+                sample_rate = getattr(feature_extractor, "sampling_rate", 16000)
+                chunk_length = int(sample_rate * (self._chunk_ms / 1000.0))
+                stride_length = int(chunk_length * (1.0 - self._overlap))
+                if hasattr(feature_extractor, "chunk_length"):
+                    feature_extractor.chunk_length = max(chunk_length, 1)
+                if hasattr(feature_extractor, "stride_length"):
+                    feature_extractor.stride_length = max(stride_length, 1)
+
+            model = (
+                AutoModelForCTC.from_pretrained(self._model_id, revision=revision)
+                if use_revision
+                else AutoModelForCTC.from_pretrained(self._model_id)
+            )
+            register_processor(processor)
+            model.to(device)
+            model.eval()
+
+            load_end_cpu = time.perf_counter()
+            if load_event_start is not None and load_event_end is not None:
+                load_event_end.record()
+                torch.cuda.synchronize()
+                self._cold_start_ms = load_event_start.elapsed_time(load_event_end)
+            else:
+                self._cold_start_ms = (load_end_cpu - load_start_cpu) * 1000
+
+            self._components = (processor, model, device)
+
+        return self._components
+
+    def ensure_ready(self) -> tuple[AutoProcessor, AutoModelForCTC, torch.device]:
+        """Public wrapper to keep call sites stable."""
+
+        return self._ensure_ready()
+
+    def _resolve_device(self) -> torch.device:
+        if self._device_spec == "auto":
+            if torch.cuda.is_available():
+                return torch.device("cuda")
+            return torch.device("cpu")
+        return torch.device(self._device_spec)
+
+
 def _merge_adjacent_spans(spans: list[tuple[str, float, float, float | None]]) -> list[tuple[str, float, float, float | None]]:
     if not spans:
         return []
@@ -203,43 +276,3 @@ def _combine_confidence(
         value += second * weight_second
     return round(value / total_weight, 4)
 
-
-    def _ensure_ready(self) -> tuple[AutoProcessor, AutoModelForCTC, torch.device]:
-        if self._components is not None:
-            return self._components
-        device = self._resolve_device()
-        load_start_cpu = time.perf_counter()
-        load_event_start = torch.cuda.Event(enable_timing=True) if device.type == 'cuda' else None
-        load_event_end = torch.cuda.Event(enable_timing=True) if device.type == 'cuda' else None
-        if load_event_start is not None and load_event_end is not None:
-            load_event_start.record()
-        processor = AutoProcessor.from_pretrained(self._model_id, revision=self._revision)
-        feature_extractor = getattr(processor, 'feature_extractor', None)
-        if feature_extractor is not None:
-            sample_rate = getattr(feature_extractor, 'sampling_rate', 16000)
-            chunk_length = int(sample_rate * (self._chunk_ms / 1000.0))
-            stride_length = int(chunk_length * (1.0 - self._overlap))
-            if hasattr(feature_extractor, 'chunk_length'):
-                feature_extractor.chunk_length = max(chunk_length, 1)
-            if hasattr(feature_extractor, 'stride_length'):
-                feature_extractor.stride_length = max(stride_length, 1)
-        model = AutoModelForCTC.from_pretrained(self._model_id, revision=self._revision)
-        register_processor(processor)
-        model.to(device)
-        model.eval()
-        load_end_cpu = time.perf_counter()
-        if load_event_start is not None and load_event_end is not None:
-            load_event_end.record()
-            torch.cuda.synchronize()
-            self._cold_start_ms = load_event_start.elapsed_time(load_event_end)
-        else:
-            self._cold_start_ms = (load_end_cpu - load_start_cpu) * 1000
-        self._components = (processor, model, device)
-        return self._components
-
-    def _resolve_device(self) -> torch.device:
-        if self._device_spec == "auto":
-            if torch.cuda.is_available():
-                return torch.device("cuda")
-            return torch.device("cpu")
-        return torch.device(self._device_spec)
