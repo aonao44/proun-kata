@@ -1,6 +1,6 @@
 """Pydantic schemas describing API inputs and outputs."""
+
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -32,7 +32,7 @@ class PhonemeSpan(BaseModel):
     symbol: str = Field(alias="p")
     start: float
     end: float
-    confidence: Optional[float] = Field(default=None, alias="conf")
+    confidence: float | None = Field(default=None, alias="conf")
 
     model_config = {"populate_by_name": True, "str_strip_whitespace": True}
 

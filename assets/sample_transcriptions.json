@@ -1,0 +1,13 @@
+{
+  "99acd520267258bbeeacf5fc0e3e1c17452ae69b": {
+    "description": "assets/samples/can_I.wav demo recording",
+    "phones": [
+      {"symbol": "SIL", "start": 0.0, "end": 0.08, "confidence": 0.9},
+      {"symbol": "K", "start": 0.08, "end": 0.18, "confidence": 0.92},
+      {"symbol": "AE", "start": 0.18, "end": 0.32, "confidence": 0.94},
+      {"symbol": "N", "start": 0.32, "end": 0.44, "confidence": 0.9},
+      {"symbol": "AY", "start": 0.44, "end": 0.62, "confidence": 0.93},
+      {"symbol": "SIL", "start": 0.62, "end": 0.8, "confidence": 0.88}
+    ]
+  }
+}
