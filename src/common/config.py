@@ -31,12 +31,24 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CHUNK_OVERLAP", "PHONEME_OVERLAP"),
     )
     confidence_threshold: float = Field(
-        default=0.30,
+        default=0.0,
         validation_alias=AliasChoices("CONF_THRESHOLD", "PHONEME_CONFIDENCE_THRESHOLD"),
     )
     min_phone_ms: int = Field(
-        default=40,
+        default=0,
         validation_alias=AliasChoices("MIN_PHONE_MS", "PHONEME_MIN_PHONE_MS"),
+    )
+    min_input_ms: int = Field(
+        default=320,
+        validation_alias=AliasChoices("MIN_INPUT_MS", "PHONEME_MIN_INPUT_MS"),
+    )
+    reject_ms: int = Field(
+        default=0,
+        validation_alias=AliasChoices("REJECT_MS", "PHONEME_REJECT_MS"),
+    )
+    auto_long_vowel_ms: int = Field(
+        default=140,
+        validation_alias=AliasChoices("LONG_VOWEL_MS", "PHONEME_LONG_VOWEL_MS"),
     )
     reading_style: str = Field(
         default="balanced",

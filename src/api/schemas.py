@@ -58,7 +58,16 @@ class KanaOut(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ResponseParams(BaseModel):
+    conf_threshold: float
+    min_phone_ms: float
+    long_vowel_ms: float
+    min_input_ms: float
+    reject_ms: float
+
+
 class TranscriptionResponse(BaseModel):
     phones: list[PhonemeOut]
     kana: list[KanaOut]
     kana_text: str
+    params: ResponseParams

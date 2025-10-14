@@ -9,3 +9,7 @@
 ## Samples
 
 - `samples/can_I.wav`: short phrase "can I" recorded for testing.
+
+## Phoneme Language Models
+
+- `phonelm/phone_bigram.json`: heuristic English phoneme bigram log-likelihoods generated in-repo to guide beam-search decoding.

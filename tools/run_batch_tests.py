@@ -9,18 +9,19 @@ import json
 import os
 import sys
 import time
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional
 
 import requests
 from requests import Response
 from tqdm import tqdm
 
+DEFAULT_ROOT = Path("audio_samples")
 DEFAULT_PATTERN = "**/*.wav"
 DEFAULT_ARTIFACT_DIR = Path("artifacts/json")
-DEFAULT_RESULTS_CSV = Path("results.csv")
+DEFAULT_RESULTS_CSV = Path("artifacts/batch_results.csv")
 
 
 @dataclass
@@ -28,16 +29,16 @@ class TestResult:
     path: Path
     status_code: int
     passed: bool
-    phones_len: Optional[int]
-    kana_len: Optional[int]
+    phones_len: int | None
+    kana_len: int | None
     kana_text: str
     latency_ms: float
-    error: Optional[str] = None
-    raw_json: Optional[dict] = None
+    error: str | None = None
+    raw_json: dict | None = None
 
     @property
     def pass_flag(self) -> str:
-        return "PASS" if self.passed else "FAIL"
+        return "1" if self.passed else "0"
 
 
 def discover_files(root: Path, pattern: str) -> list[Path]:
@@ -47,7 +48,12 @@ def discover_files(root: Path, pattern: str) -> list[Path]:
     return files
 
 
-def send_request(session: requests.Session, base_url: str, path: Path, timeout: float) -> tuple[Response, float]:
+def send_request(
+    session: requests.Session,
+    base_url: str,
+    path: Path,
+    timeout: float,
+) -> tuple[Response, float]:
     url = base_url.rstrip("/") + "/transcribe_phonetic"
     start = time.perf_counter()
     with path.open("rb") as fh:
@@ -107,7 +113,13 @@ def evaluate_response(response: Response, latency_ms: float, path: Path) -> Test
     )
 
 
-def process_file(path: Path, base_url: str, timeout: float, save_json: bool, json_dir: Path) -> TestResult:
+def process_file(
+    path: Path,
+    base_url: str,
+    timeout: float,
+    save_json: bool,
+    json_dir: Path,
+) -> TestResult:
     session = requests.Session()
     try:
         response, latency_ms = send_request(session, base_url, path, timeout)
@@ -156,39 +168,42 @@ def run_batch(
                 executor.submit(process_file, path, base_url, timeout, save_json, json_dir): path
                 for path in files
             }
-            for future in tqdm(as_completed(future_map), total=len(future_map), desc="Testing", unit="file"):
+            for future in tqdm(
+                as_completed(future_map),
+                total=len(future_map),
+                desc="Testing",
+                unit="file",
+            ):
                 results.append(future.result())
 
     return results
 
 
-def write_csv(results: list[TestResult], output_csv: Path) -> None:
+def write_csv(results: list[TestResult], output_csv: Path, root: Path) -> None:
     output_csv.parent.mkdir(parents=True, exist_ok=True)
     with output_csv.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.writer(fh)
         writer.writerow(
             [
-                "path",
+                "file",
                 "status_code",
                 "pass",
                 "phones_len",
-                "kana_len",
                 "kana_text",
-                "latency_ms",
-                "error",
             ]
         )
-        for result in results:
+        for result in sorted(results, key=lambda r: str(r.path)):
+            try:
+                relative = result.path.relative_to(root)
+            except ValueError:
+                relative = result.path
             writer.writerow(
                 [
-                    str(result.path),
+                    str(relative),
                     result.status_code,
                     result.pass_flag,
                     result.phones_len if result.phones_len is not None else "",
-                    result.kana_len if result.kana_len is not None else "",
                     result.kana_text,
-                    f"{result.latency_ms:.2f}",
-                    result.error or "",
                 ]
             )
 
@@ -207,13 +222,59 @@ def summarize(results: list[TestResult]) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Batch tester for /transcribe_phonetic API")
-    parser.add_argument("--base", dest="base", default=os.environ.get("TRANSCRIBE_BASE_URL", "http://localhost:8000"), help="Base URL of the API (default: env TRANSCRIBE_BASE_URL or http://localhost:8000)")
-    parser.add_argument("--root", dest="root", required=True, help="Root directory containing WAV files")
-    parser.add_argument("--pattern", dest="pattern", default=DEFAULT_PATTERN, help="Glob pattern relative to root (default: **/*.wav)")
-    parser.add_argument("--timeout", dest="timeout", type=float, default=30.0, help="Request timeout in seconds (default: 30)")
-    parser.add_argument("--results", dest="results", default=str(DEFAULT_RESULTS_CSV), help="Path to CSV output (default: results.csv)")
-    parser.add_argument("--max-workers", dest="max_workers", type=int, default=1, help="Number of concurrent workers")
-    parser.add_argument("--save-json", dest="save_json", action="store_true", help="Save JSON responses to artifacts/json/")
+    parser.add_argument(
+        "--base",
+        dest="base",
+        default=os.environ.get("TRANSCRIBE_BASE_URL", "http://localhost:8000"),
+        help="Base URL of the API (default: env TRANSCRIBE_BASE_URL or http://localhost:8000)",
+    )
+    parser.add_argument(
+        "--root",
+        dest="root",
+        default=str(DEFAULT_ROOT),
+        help=f"Root directory containing WAV files (default: {DEFAULT_ROOT})",
+    )
+    parser.add_argument(
+        "--pattern",
+        dest="pattern",
+        default=DEFAULT_PATTERN,
+        help="Glob pattern relative to root (default: **/*.wav)",
+    )
+    parser.add_argument(
+        "--timeout",
+        dest="timeout",
+        type=float,
+        default=30.0,
+        help="Request timeout in seconds (default: 30)",
+    )
+    parser.add_argument(
+        "--results",
+        dest="results",
+        default=str(DEFAULT_RESULTS_CSV),
+        help=f"Path to CSV output (default: {DEFAULT_RESULTS_CSV})",
+    )
+    parser.add_argument(
+        "--max-workers",
+        dest="max_workers",
+        type=int,
+        default=1,
+        help="Number of concurrent workers",
+    )
+    parser.add_argument(
+        "--save-json",
+        dest="save_json",
+        action="store_true",
+        help=f"Save JSON responses under {DEFAULT_ARTIFACT_DIR}",
+    )
+    parser.add_argument(
+        "--json-dir",
+        dest="json_dir",
+        default=str(DEFAULT_ARTIFACT_DIR),
+        help=(
+            "Directory for JSON artifacts when --save-json is set "
+            f"(default: {DEFAULT_ARTIFACT_DIR})"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -233,7 +294,10 @@ def main() -> int:
         print("No matching WAV files found.")
         return 1
 
-    json_dir = DEFAULT_ARTIFACT_DIR if args.save_json else Path("./")
+    json_dir = Path(args.json_dir).expanduser().resolve()
+    if not args.save_json:
+        json_dir = Path(json_dir)
+
     results = run_batch(
         files=files,
         base_url=args.base,
@@ -243,8 +307,13 @@ def main() -> int:
         json_dir=json_dir,
     )
 
-    write_csv(results, Path(args.results))
+    results_csv = Path(args.results).expanduser().resolve()
+    write_csv(results, results_csv, root)
     summarize(results)
+
+    print(f"CSV written to {results_csv}")
+    if args.save_json:
+        print(f"JSON artifacts saved under {json_dir}")
 
     return 0 if all(r.passed for r in results) else 1
 
