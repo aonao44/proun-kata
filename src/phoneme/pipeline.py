@@ -17,6 +17,8 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
+from core.normalize import normalize_symbol
+
 try:  # Optional heavy dependencies; fallback to stub if missing.
     import torch
     import torchaudio.functional as AF
@@ -39,45 +41,6 @@ PHONEME_MODEL_ID = os.getenv("PHONEME_MODEL_ID", "stub")
 TARGET_SAMPLE_RATE = 16_000
 CONFIDENCE_DECIMALS = 4
 TIME_DECIMALS = 3
-
-IPA_TO_ARPA = {
-    "tʃ": "CH",
-    "dʒ": "JH",
-    "ʃ": "SH",
-    "ʒ": "ZH",
-    "θ": "TH",
-    "ð": "DH",
-    "ŋ": "NG",
-    "ɹ": "R",
-    "ɾ": "D",
-    "ɪ": "IH",
-    "i": "IY",
-    "ʊ": "UH",
-    "u": "UW",
-    "eɪ": "EY",
-    "aɪ": "AY",
-    "oʊ": "OW",
-    "ɔɪ": "OY",
-    "aʊ": "AW",
-    "ɜ": "ER",
-    "ɝ": "ER",
-    "ə": "AH",
-    "ˈ": "",
-    "ˌ": "",
-    "æ": "AE",
-    "ɑ": "AA",
-    "ɔ": "AO",
-    "ʌ": "AH",
-    "ʔ": "Q",
-    "sil": "SIL",
-    "sp": "SP",
-    "nsn": "NSN",
-    "pau": "SIL",
-    "|": "",
-}
-
-STRESS_PATTERN = re.compile(r"\d")
-
 
 @dataclass(slots=True)
 class Phoneme:
@@ -115,11 +78,11 @@ class PhonemeResult:
 
 STUB_PHONE_SEQUENCE: tuple[tuple[str, float, float, float], ...] = (
     ("SIL", 0.0, 0.08, 0.95),
-    ("M", 0.08, 0.2, 0.99),
-    ("EY", 0.2, 0.35, 0.99),
-    ("K", 0.35, 0.45, 0.98),
-    ("IH", 0.45, 0.55, 0.98),
-    ("T", 0.55, 0.68, 0.97),
+    ("m", 0.08, 0.2, 0.99),
+    ("eɪ", 0.2, 0.35, 0.99),
+    ("k", 0.35, 0.45, 0.98),
+    ("ɪ", 0.45, 0.55, 0.98),
+    ("t", 0.55, 0.68, 0.97),
     ("SIL", 0.68, 0.8, 0.95),
 )
 
@@ -309,7 +272,7 @@ def _decode_logits(*, logits: torch.Tensor, processor, audio_duration: float) ->
     for frame_idx, token_id in enumerate(pred_ids.tolist()):
         if blank_id is not None and token_id == blank_id:
             if prev_id is not None:
-                phones.append(
+                phones.extend(
                     _build_phoneme(
                         token_id=prev_id,
                         start_index=span_start,
@@ -330,7 +293,7 @@ def _decode_logits(*, logits: torch.Tensor, processor, audio_duration: float) ->
         if token_id == prev_id:
             continue
 
-        phones.append(
+        phones.extend(
             _build_phoneme(
                 token_id=prev_id,
                 start_index=span_start,
@@ -344,7 +307,7 @@ def _decode_logits(*, logits: torch.Tensor, processor, audio_duration: float) ->
         span_start = frame_idx
 
     if prev_id is not None:
-        phones.append(
+        phones.extend(
             _build_phoneme(
                 token_id=prev_id,
                 start_index=span_start,
@@ -366,47 +329,54 @@ def _build_phoneme(
     tokenizer,
     probs: torch.Tensor,
     frame_duration: float,
-) -> Phoneme:
+) -> list[Phoneme]:
     token = tokenizer.convert_ids_to_tokens(int(token_id))
-    symbol = _normalize_symbol(token)
-    if not symbol:
-        symbol = token.upper()
+    symbols = normalize_symbol(token)
 
-    start = round(start_index * frame_duration, TIME_DECIMALS)
-    end = round(end_index * frame_duration, TIME_DECIMALS)
-    end = max(end, start)
+    if not symbols:
+        fallback = token if isinstance(token, str) else ""
+        fallback_symbol = fallback.strip() or (fallback.upper() if fallback else "")
+        if fallback_symbol:
+            symbols = normalize_symbol(fallback_symbol) or [fallback_symbol]
 
+    if not symbols:
+        return []
+
+    start_time = start_index * frame_duration
+    end_time = max(end_index * frame_duration, start_time)
+
+    confidence: float | None = None
     if end_index > start_index:
         segment_probs = probs[0, start_index:end_index, token_id]
-        confidence = float(torch.mean(segment_probs).item())
-        confidence = float(round(confidence, CONFIDENCE_DECIMALS))
-    else:
-        confidence = None
+        if segment_probs.numel() > 0:
+            confidence = float(torch.mean(segment_probs).item())
+            confidence = float(round(confidence, CONFIDENCE_DECIMALS))
 
-    return Phoneme(symbol=symbol, start=start, end=end, confidence=confidence)
+    intervals = _split_interval(start_time, end_time, len(symbols))
+    phonemes: list[Phoneme] = []
+    for symbol, (seg_start, seg_end) in zip(symbols, intervals, strict=True):
+        phonemes.append(
+            Phoneme(
+                symbol=symbol,
+                start=round(seg_start, TIME_DECIMALS),
+                end=round(seg_end, TIME_DECIMALS),
+                confidence=confidence,
+            )
+        )
+    return phonemes
 
 
-def _normalize_symbol(token: str) -> str:
-    if not token:
-        return ""
+def _split_interval(start: float, end: float, segments: int) -> list[tuple[float, float]]:
+    if segments <= 0:
+        return []
+    if end <= start:
+        return [(start, start)] * segments
+    step = (end - start) / segments
+    points = [start + step * idx for idx in range(segments + 1)]
+    points[0] = start
+    points[-1] = end
+    return [(points[idx], points[idx + 1]) for idx in range(segments)]
 
-    cleaned = STRESS_PATTERN.sub("", token)
-    cleaned = cleaned.replace(" ", "").replace("ː", "")
-    lowered = cleaned.lower()
-
-    if lowered in IPA_TO_ARPA:
-        return IPA_TO_ARPA[lowered]
-
-    for ipa, arpa in IPA_TO_ARPA.items():
-        if ipa and ipa in cleaned:
-            cleaned = cleaned.replace(ipa, arpa)
-
-    cleaned = cleaned.strip()
-    if not cleaned:
-        return ""
-    if re.fullmatch(r"[a-zA-Z]+", cleaned):
-        return cleaned.upper()
-    return cleaned.upper()
 
 
 @lru_cache(maxsize=1)

@@ -5,6 +5,15 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+class ShortAudioError(ValueError):
+    """Raised when input audio is shorter than the acceptable minimum."""
+
+    def __init__(self, duration_ms: float, minimum_ms: float) -> None:
+        super().__init__(f"audio too short: {duration_ms:.2f}ms < {minimum_ms:.2f}ms")
+        self.duration_ms = duration_ms
+        self.minimum_ms = minimum_ms
+
+
 @dataclass(slots=True)
 class PhonemeSpan:
     """音素とタイムスタンプを表す。"""
@@ -30,6 +39,8 @@ class TranscriptionMetrics:
     overlap: float
     conf_threshold: float
     min_phone_ms: float
+    min_input_ms: float
+    reject_ms: float
 
 
 class PhonemePipeline(Protocol):

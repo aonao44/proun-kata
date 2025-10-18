@@ -26,6 +26,8 @@ def _new_pipeline() -> PhonemePipeline:
         overlap=settings.overlap,
         conf_threshold=settings.confidence_threshold,
         min_phone_ms=settings.min_phone_ms,
+        min_input_ms=settings.min_input_ms,
+        reject_ms=settings.reject_ms,
     )
 
 

@@ -93,21 +93,41 @@ def _finalise_span(
 ) -> None:
     processor = _lazy_processor()
     raw_token = processor.tokenizer.convert_ids_to_tokens(token_id)
-    symbol = normalize_symbol(raw_token)
-    if not symbol:
+    symbols = normalize_symbol(raw_token)
+    if not symbols:
         return
-    duration = (end_index - start_index) * frame_duration
-    if symbol not in {"SIL", "SP", "NSN"} and duration < min_duration:
-        return
-    start = round(start_index * frame_duration, 3)
-    end = round(end_index * frame_duration, 3)
-    confidence = None
+
+    silence_symbols = {"SIL", "SP", "NSN"}
+    total_start = start_index * frame_duration
+    total_end = end_index * frame_duration
     segment = probabilities[start_index:end_index, token_id]
+    confidence: float | None = None
     if segment.numel() > 0:
         confidence = float(torch.mean(segment).item())
-        if confidence < conf_threshold and symbol not in {"SIL", "SP", "NSN"}:
+        if confidence < conf_threshold and not all(sym in silence_symbols for sym in symbols):
             return
-    spans.append((symbol, start, end, confidence))
+
+    intervals = _split_interval(total_start, total_end, len(symbols))
+    effective_min = min_duration if len(symbols) == 1 else 0.0
+
+    for symbol, (seg_start, seg_end) in zip(symbols, intervals, strict=True):
+        seg_duration = seg_end - seg_start if seg_end >= seg_start else 0.0
+        if symbol not in silence_symbols and seg_duration < effective_min:
+            continue
+        spans.append((symbol, round(seg_start, 3), round(seg_end, 3), confidence))
+
+
+def _split_interval(start: float, end: float, segments: int) -> list[tuple[float, float]]:
+    if segments <= 0:
+        return []
+    if end <= start:
+        return [(start, start)] * segments
+    step = (end - start) / segments
+    points = [start + step * idx for idx in range(segments + 1)]
+    points[0] = start
+    points[-1] = end
+    return [(points[idx], points[idx + 1]) for idx in range(segments)]
+
 
 
 _lazy_cache: dict[str, Any] = {}

@@ -1,0 +1,44 @@
+category,filename,http_code,phones_len,phones,kana_text
+01_liaisons,do_it.wav,200,5,"d uː w eɪ t",ドウウェイット
+01_liaisons,get_it.wav,200,4,"k ʌ d d",カドド
+01_liaisons,go_on.wav,200,5,"ɡ ɔ w ʌ n",グオウアン
+01_liaisons,good_boy.wav,200,5,"k ʌ d b ɔ",カドブオー
+01_liaisons,have_to.wav,200,5,"h ʌ f t uː",ハアフトウー
+01_liaisons,i_agree.wav,200,5,"ʌ ə d ɹ iː",アアドリイー
+01_liaisons,left_bank.wav,200,4,"ə f b ɛ",アフブエ
+01_liaisons,live_in.wav,200,3,"l iː v",ルイヴ
+01_liaisons,lot_of.wav,200,4,"l ɑː ɹ v",ルアーヴ
+01_liaisons,need_in.wav,200,4,"n iː d n",ニードン
+01_liaisons,next_day.wav,200,6,"n ɑː k s ə ɪ",ナークサイ
+01_liaisons,out_of_it.wav,200,6,"ɑ ɹ ʌ v e d",アーアヴェイド
+01_liaisons,pick_it_up.wav,200,5,"ð ʌ k iː ɑː",ザキーアー
+01_liaisons,right_away.wav,200,6,"ɹ ʌ ɾ ʌ w eɪ",ラアラアウエー
+01_liaisons,take_it.wav,200,5,"ð eɪ k aɪ d",ズェイクァイド
+01_liaisons,ten_bikes.wav,200,6,"ə n b aɪ k s",アンブァイクス
+01_liaisons,turn_it_on.wav,200,6,"t ɑ n iː ɑ n",タンイアン
+01_liaisons,water.wav,200,3,"w ɾ ɚ",ウラアー
+02_words,apple.wav,200,3,"ʌ p o",アプオー
+02_words,coffee.wav,200,4,"k ɑ v iː",カヴィー
+02_words,happy.wav,200,3,"h ʌ p",ハアップ
+02_words,hello.wav,200,4,"h ʌ l ɔ",ハアルオー
+02_words,morning.wav,200,4,"m uː n ŋ",ムウンング
+02_words,open.wav,200,5,"ʔ ɔ p ə n",ッオパン
+02_words,picture.wav,200,7,"b iː k s ə æ ɚ",ビクサアアー
+02_words,summer.wav,200,3,"ʌ m ɚ",アムアー
+02_words,table.wav,200,4,"t eɪ p oʊ",トェイプオー
+02_words,window.wav,200,4,"w eɪ n aʊ",ウェインアウ
+03_sentences,have_a_nice_day.wav,200,8,"h ʌ v iː n aɪ ɾ eɪ",ハアヴィンァイリエー
+03_sentences,i_am_happy.wav,200,5,"ʌ ʌ θ ɑ iː",アアサイー
+03_sentences,i_like_coffee.wav,200,7,"ʔ ʌ n k ɑ f iː",ッアンカフィー
+03_sentences,i_understand.wav,200,9,"ʌ j ʌ n ɚ s t eɪ d",アイアンアストェイド
+03_sentences,it_is_beautiful.wav,200,11,"ʔ iː ə z b j uː ɾ ʌ f ɔ",ッイアズブュウーラアフオー
+03_sentences,open_the_window.wav,200,7,"o iː n ə w n ʌ",オウインアウンア
+03_sentences,see_you_later.wav,200,5,"s l aɪ ɾ ɚ",スルァイラアー
+03_sentences,thank_you_very_much.wav,200,10,"f iː k uː v ɹ iː m ʌ t",フィクウヴリイムアット
+03_sentences,this_is_good.wav,200,6,"d s ɪ ə ɡ d",ドシアグド
+03_sentences,where_are_you.wav,200,5,"w e ɹ ɑː j",ウェイアイ
+04_phonetic,america.wav,200,7,"ʔ ʌ m ɛ ɹ k ʌ",ッアムエカ
+04_phonetic,banana.wav,200,6,"b ʌ n ɑː n ʌ",バンアンア
+04_phonetic,camera.wav,200,5,"k ʌ m ɚ ʌ",カムアア
+04_phonetic,idea.wav,200,3,"ʌ ɾ iː",アリイー
+04_phonetic,radio.wav,200,3,"ɹ iː d",リイド

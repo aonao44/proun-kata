@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from enum import Enum
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 PHONEME_MAX_BYTES = 20 * 1024 * 1024
@@ -58,7 +60,19 @@ class KanaOut(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ResponseParams(BaseModel):
+    conf_threshold: float
+    min_phone_ms: float
+    long_vowel_ms: float
+    min_input_ms: float
+    reject_ms: float
+
+
 class TranscriptionResponse(BaseModel):
-    phones: list[PhonemeOut]
-    kana: list[KanaOut]
+    phones: list[dict[str, Any]]
+    kana: list[dict[str, Any]]
     kana_text: str
+    kana_text_strict: str | None = None
+    kana_text_readable: str | None = None
+    kana_ops: list[dict[str, Any]] | None = None
+    params: ResponseParams

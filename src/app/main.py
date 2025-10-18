@@ -172,7 +172,7 @@ def _apply_kana(
     )
     kana_tokens = [
         KanaToken(value=value, start=phone.start, end=phone.end)
-        for phone, value in zip(result.phones, kana_values, strict=True)
+        for phone, value in zip(result.phones, kana_values)
     ]
     return PhonemeResult(phones=result.phones, kana=kana_tokens)
 
@@ -191,7 +191,14 @@ def _to_response(result: PhonemeResult) -> PhoneticTranscriptionResponse:
         KanaSpan(kana=token.value, start=token.start, end=token.end)
         for token in (result.kana or ())
     ]
-    return PhoneticTranscriptionResponse(phones=phones, kana=kana, kana_text=result.kana_text)
+    return PhoneticTranscriptionResponse(
+        phones=phones,
+        kana=kana,
+        kana_text=result.kana_text,
+        kana_text_readable=result.kana_text,
+        kana_text_strict=result.kana_text,
+        kana_ops=[],
+    )
 
 
 def _guess_extension(filename: str | None, content_type: str | None) -> str:
