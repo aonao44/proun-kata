@@ -21,13 +21,13 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 from core.normalize import ALLOWED_SYMBOLS, normalize_symbol
 from .audio import ensure_sample_rate, load_waveform
 from .ctc_decode import (
-        BeamSearchConfig,
-        PhoneLanguageModel,
-        TokenCatalog,
-        beam_search_ctc,
-        build_token_catalog,
-        load_phone_language_model,
-    )
+    BeamSearchConfig,
+    PhoneLanguageModel,
+    TokenCatalog,
+    beam_search_ctc,
+    build_token_catalog,
+    load_phone_language_model,
+)
 from .postprocess import apply_phonetic_postprocessing
 from .pipeline import PhonemePipeline, PhonemeSpan, ShortAudioError, TranscriptionMetrics
 from phones.decode import build_phoneme_spans, register_processor
@@ -211,13 +211,16 @@ class Wav2Vec2Pipeline(PhonemePipeline):
         default_lm_path = Path(__file__).resolve().parents[2] / "assets" / "phonelm" / "phone_bigram.json"
         self._lm_path = os.getenv("DECODE_LM_PATH", str(default_lm_path))
         self._beam_config = BeamSearchConfig(
-            beam_size=max(1, _env_int("DECODE_BEAM_SIZE", 32)),
-            lm_weight=_env_float("DECODE_LM_WEIGHT", 0.7),
-            insertion_penalty=_env_float("DECODE_INSERTION_PENALTY", 0.3),
-            cluster_penalty=_env_float("DECODE_CLUSTER_PENALTY", 0.1),
-            length_norm=True,
-            use_voicing=_env_bool("DECODE_USE_VOICING", True),
-            use_th_resolver=_env_bool("DECODE_USE_TH_RESOLVER", True),
+            beam_size=max(1, _env_int("DECODE_BEAM_SIZE", 12)),
+            vowel_bonus=_env_float("DECODE_VOWEL_BONUS", 0.15),
+            repeat_penalty=_env_float("DECODE_REPEAT_PENALTY", 0.2),
+            final_cons_penalty=_env_float("DECODE_FINAL_CONS_PENALTY", 0.3),
+            th_bonus=_env_float("DECODE_TH_BONUS", 0.0),
+            use_voicing=_env_bool("DECODE_USE_VOICING", False),
+            voicing_bonus=0.2,
+            voicing_threshold=0.4,
+            lm_weight=_env_float("DECODE_LM_WEIGHT", 0.0),
+            insertion_penalty=_env_float("DECODE_INSERTION_PENALTY", 0.0),
         )
         self._phone_lm: PhoneLanguageModel | None = None
         self._token_catalog: TokenCatalog | None = None
@@ -225,13 +228,13 @@ class Wav2Vec2Pipeline(PhonemePipeline):
         self._cold_start_ms: float | None = None
         self._load_lock = threading.Lock()
         LOGGER.info(
-            "decoder_config beam=%d lm_weight=%.2f ins_pen=%.2f cluster=%.2f voicing=%s th=%s",
+            "decoder_config beam=%d vowel=%.2f repeat=%.2f final=%.2f th=%.2f voicing=%s",
             self._beam_config.beam_size,
-            self._beam_config.lm_weight,
-            self._beam_config.insertion_penalty,
-            self._beam_config.cluster_penalty,
+            self._beam_config.vowel_bonus,
+            self._beam_config.repeat_penalty,
+            self._beam_config.final_cons_penalty,
+            self._beam_config.th_bonus,
             self._beam_config.use_voicing,
-            self._beam_config.use_th_resolver,
         )
 
     async def transcribe(self, audio_bytes: bytes, *, req_id: str) -> tuple[list[PhonemeSpan], TranscriptionMetrics]:
@@ -512,8 +515,6 @@ class Wav2Vec2Pipeline(PhonemePipeline):
     def _prepare_for_model(self, chunk: torch.Tensor, sample_rate: int) -> tuple[torch.Tensor, int]:
         original_samples = chunk.shape[-1]
         duration_ms = original_samples / float(sample_rate) * 1000.0
-        if self._reject_ms and duration_ms < self._reject_ms:
-            raise ShortAudioError(duration_ms, self._reject_ms)
 
         min_samples = int(round(sample_rate * (self._min_input_ms / 1000.0)))
         pad = max(0, min_samples - original_samples)

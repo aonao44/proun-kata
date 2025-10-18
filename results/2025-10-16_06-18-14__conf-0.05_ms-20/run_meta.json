@@ -1,0 +1,12 @@
+{
+  "timestamp": "2025-10-16_06-18-14",
+  "base_url": "http://localhost:8001/transcribe_phonetic",
+  "conf_threshold": 0.05,
+  "min_phone_ms": 20,
+  "min_input_ms": 320,
+  "reject_ms": 0,
+  "long_vowel_ms": 140,
+  "python": "Python 3.11.7",
+  "git_commit": "70d662b",
+  "hostname": "naokinoMacBook-Air.local"
+}

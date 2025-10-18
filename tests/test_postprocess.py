@@ -5,7 +5,7 @@ from asr.pipeline import PhonemeSpan
 from asr.postprocess import apply_phonetic_postprocessing
 
 
-def _span(symbol: str, start: float = 0.0, end: float = 0.1, confidence: float | None = 0.5) -> PhonemeSpan:
+def _span(symbol: str, start: float = 0.0, end: float = 0.03, confidence: float | None = 0.5) -> PhonemeSpan:
     return PhonemeSpan(symbol=symbol, start=start, end=end, confidence=confidence)
 
 
@@ -30,3 +30,10 @@ def test_recover_missing_vowel_in_consonant_cluster() -> None:
     ]
     result = apply_phonetic_postprocessing(spans)
     assert any(span.symbol == "ə" for span in result)
+
+
+def test_boundary_glottal_removed_when_low_conf() -> None:
+    spans = [_span("ʔ", confidence=0.1), _span("æ", confidence=0.6), _span("ʔ", confidence=0.2)]
+    result = apply_phonetic_postprocessing(spans)
+    assert result[0].symbol != "ʔ"
+    assert result[-1].symbol != "ʔ"

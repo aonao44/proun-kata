@@ -64,9 +64,15 @@ for category_dir in "${AUDIO_ROOT}"/*/; do
     echo "$body" > "${OUTDIR}/json/${category_name}__${filename%.wav}.json"
     
     # ===== 修正2: 音素列追加、avg_conf削除 =====
-    phones_len=$(echo "$body" | jq '.phones | length // 0')
-    phones=$(echo "$body" | jq -r '[.phones[].p] | join(" ")')
-    kana_text=$(echo "$body" | jq -r '.kana_text // ""')
+    if [ "$code" = "200" ]; then
+      phones_len=$(echo "$body" | jq '.phones | length // 0')
+      phones=$(echo "$body" | jq -r '[.phones[].p] | join(" ")')
+      kana_text=$(echo "$body" | jq -r '.kana_text // ""')
+    else
+      phones_len=0
+      phones="HTTP ${code}"
+      kana_text="HTTP ${code}"
+    fi
     
     echo "${category_name},${filename},${code},${phones_len},\"${phones}\",${kana_text}" >> "${OUTDIR}/batch_results.csv"
     

@@ -50,6 +50,7 @@ def apply_phonetic_postprocessing(spans: Sequence[PhonemeSpan]) -> list[PhonemeS
     adjusted = _apply_flap_rules(adjusted)
     adjusted = _apply_voicing_adjustments(adjusted)
     adjusted = _recover_missing_vowels(adjusted)
+    adjusted = _suppress_boundary_glottal(adjusted)
     return adjusted
 
 
@@ -103,6 +104,24 @@ def _recover_missing_vowels(spans: Sequence[PhonemeSpan]) -> list[PhonemeSpan]:
             )
             target = result[target_idx]
             result[target_idx] = replace(target, symbol="ə")
+    return result
+
+
+def _suppress_boundary_glottal(spans: Sequence[PhonemeSpan]) -> list[PhonemeSpan]:
+    if not spans:
+        return list(spans)
+
+    def _should_drop(span: PhonemeSpan) -> bool:
+        confidence_ok = span.confidence is None or span.confidence < 0.40
+        duration_ms = (span.end - span.start) * 1000.0
+        duration_ok = duration_ms < 40.0
+        return confidence_ok and duration_ok
+
+    result = list(spans)
+    if result and result[0].symbol == "ʔ" and _should_drop(result[0]):
+        result.pop(0)
+    if result and result[-1].symbol == "ʔ" and _should_drop(result[-1]):
+        result.pop()
     return result
 
 

@@ -5,15 +5,14 @@ from __future__ import annotations
 import logging
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import JSONResponse
 
 from api.dependencies import get_pipeline, new_request_id
 from api.schemas import (
     PHONEME_MAX_BYTES,
     FinalConsonantHandling,
-    KanaOut,
     KanaStyle,
     LongVowelLevel,
-    PhonemeOut,
     RColoring,
     ResponseParams,
     SokuonLevel,
@@ -59,6 +58,7 @@ async def transcribe_phonetic(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail={"error": "invalid_mime"},
         )
+    input_name = audio.filename or "unknown"
     payload = await audio.read()
     if not payload:
         raise HTTPException(
@@ -94,36 +94,55 @@ async def transcribe_phonetic(
     resolved_sokuon = _resolve_level(sokuon_level, settings.sokuon_level, 0, 2)
     resolved_r = _resolve_level(r_coloring, settings.r_coloring, 0, 1)
 
-    kana_result = to_kana_sequence(
-        phones,
-        options=KanaConversionOptions(
-            reading_style=resolved_style.value,
-            long_vowel_level=resolved_long,
-            sokuon_level=resolved_sokuon,
-            r_coloring=bool(resolved_r),
-            th_style=th.value,
-            final_c_handling=final_c_t.value,
-            auto_long_vowel_ms=float(settings.auto_long_vowel_ms),
-        ),
-    )
-    phoneme_payload = [
-        PhonemeOut(
-            symbol=phone.symbol,
-            start=phone.start,
-            end=phone.end,
-            confidence=phone.confidence,
+    try:
+        kana_result = to_kana_sequence(
+            phones,
+            options=KanaConversionOptions(
+                reading_style=resolved_style.value,
+                long_vowel_level=resolved_long,
+                sokuon_level=resolved_sokuon,
+                r_coloring=bool(resolved_r),
+                th_style=th.value,
+                final_c_handling=final_c_t.value,
+                auto_long_vowel_ms=float(settings.auto_long_vowel_ms),
+            ),
         )
+    except Exception as exc:  # noqa: BLE001
+        LOGGER.exception(
+            "kana conversion failed",
+            extra={
+                "req_id": req_id,
+                "error": "kana-rule-failed",
+                "exc_type": exc.__class__.__name__,
+                "filename": input_name,
+            },
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "error": "internal",
+                "detail": "kana-rule-failed",
+                "filename": input_name,
+            },
+        )
+    phoneme_payload = [
+        {"p": phone.symbol, "start": phone.start, "end": phone.end, "conf": phone.confidence}
         for phone in phones
     ]
     kana_tokens = [token or "" for token in kana_result.tokens]
     kana_payload = [
-        KanaOut(kana=value, start=phone.start, end=phone.end)
-        for phone, value in zip(phones, kana_tokens, strict=True)
+        {"k": value, "start": phone.start, "end": phone.end}
+        for phone, value in zip(phones, kana_tokens)
     ]
+    kana_text_readable = kana_result.readable_text or kana_result.text
+    kana_text_strict = kana_result.strict_text or kana_text_readable
     response = TranscriptionResponse(
         phones=phoneme_payload,
         kana=kana_payload,
-        kana_text=kana_result.text,
+        kana_text=kana_text_readable,
+        kana_text_readable=kana_text_readable,
+        kana_text_strict=kana_text_strict,
+        kana_ops=kana_result.ops or [],
         params=ResponseParams(
             conf_threshold=metrics.conf_threshold,
             min_phone_ms=metrics.min_phone_ms,

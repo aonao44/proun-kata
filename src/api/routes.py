@@ -8,10 +8,8 @@ from api.dependencies import get_pipeline, new_request_id
 from api.schemas import (
     PHONEME_MAX_BYTES,
     FinalConsonantHandling,
-    KanaOut,
     KanaStyle,
     LongVowelLevel,
-    PhonemeOut,
     RColoring,
     ResponseParams,
     SokuonLevel,
@@ -99,19 +97,16 @@ async def transcribe_phonetic(
         )
         kana_tokens = [(token or "") for token in (kana_result.tokens or [])]
         phoneme_payload = [
-            PhonemeOut(
-                symbol=phone.symbol or "<sp>",
-                start=phone.start,
-                end=phone.end,
-                confidence=phone.confidence,
-            )
+            {"p": phone.symbol or "<sp>", "start": phone.start, "end": phone.end, "conf": phone.confidence}
             for phone in phones
         ]
         kana_payload = [
-            KanaOut(kana=value, start=phone.start, end=phone.end)
-            for phone, value in zip(phones, kana_tokens, strict=True)
+            {"k": value, "start": phone.start, "end": phone.end}
+            for phone, value in zip(phones, kana_tokens)
         ]
-        kana_text = kana_result.text
+        kana_text = kana_result.readable_text or kana_result.text
+        kana_text_strict = kana_result.strict_text or kana_text
+        kana_ops = kana_result.ops or []
     except Exception as exc:  # noqa: BLE001
         LOGGER.exception("postprocess failed", extra={"req_id": req_id})
         raise HTTPException(
@@ -141,6 +136,9 @@ async def transcribe_phonetic(
         phones=phoneme_payload,
         kana=kana_payload,
         kana_text=kana_text,
+        kana_text_strict=kana_text_strict,
+        kana_text_readable=kana_text,
+        kana_ops=kana_ops,
         params=ResponseParams(
             conf_threshold=metrics.conf_threshold,
             min_phone_ms=metrics.min_phone_ms,

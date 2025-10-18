@@ -53,5 +53,8 @@ class PhoneticTranscriptionResponse(BaseModel):
     phones: list[PhonemeSpan]
     kana: list[KanaSpan]
     kana_text: str
+    kana_text_strict: str | None = None
+    kana_text_readable: str | None = None
+    kana_ops: list[dict[str, str | int]] | None = None
 
     model_config = {"populate_by_name": True, "str_strip_whitespace": True}

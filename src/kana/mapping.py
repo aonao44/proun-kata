@@ -1,8 +1,9 @@
 """ARPAbet列をスタイル可変のカタカナ列へ変換する。"""
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from core.normalize import canonical_to_arpabet
 
@@ -59,6 +60,15 @@ CANONICAL_CONSONANT_KANA = {
     "l": "ル",
     "ɾ": "ラ",
     "y": "イ",
+}
+
+
+READABLE_CV_FUSIONS = {
+    ("ト", "ェイ"): "テイ",
+    ("プ", "オー"): "ポー",
+    ("ド", "ォウ"): "ドウ",
+    ("グ", "ァ"): "ガ",
+    ("ニ", "イー"): "ニー",
 }
 
 CV_TOKEN_FUSIONS = {
@@ -195,6 +205,9 @@ class KanaConversionResult:
 
     tokens: list[str]
     text: str
+    strict_text: str = ""
+    readable_text: str = ""
+    ops: list[dict[str, str | int]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -202,6 +215,7 @@ class _PhoneContext:
     symbol: str
     canonical_symbol: str
     duration: float | None
+    confidence: float | None
     index: int
     prev_symbol: str | None
     next_symbol: str | None
@@ -214,9 +228,27 @@ class _PhoneContext:
     is_last_in_segment: bool
 
 
-def _coerce_phone(entry: object) -> tuple[str, float | None]:
+def _coerce_phone(entry: object) -> tuple[str, float | None, float | None]:
     if isinstance(entry, str):
-        return entry, None
+        return entry, None, None
+    if isinstance(entry, dict):
+        symbol = entry.get("sym") or entry.get("p") or entry.get("symbol") or ""
+        start = entry.get("start")
+        end = entry.get("end")
+        duration = None
+        try:
+            if start is not None and end is not None:
+                duration = float(end) - float(start)
+                if duration < 0:
+                    duration = None
+        except (TypeError, ValueError):  # noqa: BLE001
+            duration = None
+        confidence = entry.get("conf")
+        try:
+            confidence = float(confidence) if confidence is not None else None
+        except (TypeError, ValueError):  # noqa: BLE001
+            confidence = None
+        return str(symbol), duration, confidence
     if isinstance(entry, tuple) and entry:
         symbol = str(entry[0])
         duration = None
@@ -225,7 +257,13 @@ def _coerce_phone(entry: object) -> tuple[str, float | None]:
                 duration = float(entry[1])
             except (TypeError, ValueError):  # noqa: PERF203
                 duration = None
-        return symbol, duration
+        confidence = None
+        if len(entry) > 2 and entry[2] is not None:
+            try:
+                confidence = float(entry[2])
+            except (TypeError, ValueError):  # noqa: PERF203
+                confidence = None
+        return symbol, duration, confidence
     symbol = getattr(entry, "symbol", None)
     if symbol is not None:
         start = getattr(entry, "start", None)
@@ -238,8 +276,13 @@ def _coerce_phone(entry: object) -> tuple[str, float | None]:
                     duration = None
         except (TypeError, ValueError):  # noqa: BLE001
             duration = None
-        return str(symbol), duration
-    return str(entry), None
+        confidence = getattr(entry, "confidence", None)
+        try:
+            confidence = float(confidence) if confidence is not None else None
+        except (TypeError, ValueError):  # noqa: BLE001
+            confidence = None
+        return str(symbol), duration, confidence
+    return str(entry), None, None
 
 
 def _looks_like_vowel(symbol: str) -> bool:
@@ -259,25 +302,36 @@ def to_kana_sequence(
 ) -> KanaConversionResult:
     """音素配列をカタカナ配列と結合文字列へ変換する。"""
 
-    symbols_with_duration = [_coerce_phone(entry) for entry in phones]
-    canonical_list = [symbol for symbol, _ in symbols_with_duration]
+    symbols_with_props = [_coerce_phone(entry) for entry in phones]
+    canonical_list = [symbol for symbol, _, _ in symbols_with_props]
     phone_list = [canonical_to_arpabet(symbol).upper() for symbol in canonical_list]
-    durations = [duration for _, duration in symbols_with_duration]
+    durations = [duration for _, duration, _ in symbols_with_props]
+    confidences = [confidence for _, _, confidence in symbols_with_props]
     if not phone_list:
-        return KanaConversionResult(tokens=[], text="")
+        return KanaConversionResult(tokens=[], text="", strict_text="", readable_text="", ops=[])
 
     opts = options.clamp()
-    contexts = list(_build_context(phone_list, canonical_list, durations))
+    disabled_rules = _parse_disabled_rules()
+    contexts = list(_build_context(phone_list, canonical_list, durations, confidences))
     tokens = [_map_symbol(ctx, opts) for ctx in contexts]
-    tokens = _postprocess(tokens, contexts, opts)
-    kana_text = _build_text(tokens, contexts)
-    return KanaConversionResult(tokens=tokens, text=kana_text)
+    strict_tokens = tokens[:]
+    processed_tokens, ops = _postprocess_with_ops(tokens, contexts, opts, disabled_rules)
+    kana_text_readable = _build_text(processed_tokens, contexts)
+    kana_text_strict = _build_text(strict_tokens, contexts)
+    return KanaConversionResult(
+        tokens=processed_tokens,
+        text=kana_text_readable,
+        strict_text=kana_text_strict,
+        readable_text=kana_text_readable,
+        ops=ops,
+    )
 
 
 def _build_context(
     phones: Sequence[str],
     canonical: Sequence[str],
     durations: Sequence[float | None],
+    confidences: Sequence[float | None],
 ) -> Iterator[_PhoneContext]:
     prev_content = None
     prev_canonical = None
@@ -307,6 +361,7 @@ def _build_context(
             symbol=symbol,
             canonical_symbol=canonical_symbol,
             duration=durations[idx] if idx < len(durations) else None,
+            confidence=confidences[idx] if idx < len(confidences) else None,
             index=idx,
             prev_symbol=phones[idx - 1] if idx > 0 else None,
             next_symbol=next_symbol,
@@ -527,8 +582,10 @@ def _postprocess(
     tokens: list[str],
     contexts: Sequence[_PhoneContext],
     options: KanaConversionOptions,
-) -> list[str]:
+    disabled_rules: set[str],
+) -> tuple[list[str], list[dict[str, str | int]]]:
     result = tokens[:]
+    ops: list[dict[str, str | int]] = []
     _adjust_leading_n(result, contexts, options)
     for idx in range(len(result) - 1):
         current_ctx = contexts[idx]
@@ -539,7 +596,7 @@ def _postprocess(
             result[idx + 1] = "イ" if following else "イ"
         if current_ctx.symbol == "K" and next_ctx.symbol in {"IH", "IY"}:
             result[idx] = "キ" if next_ctx.symbol == "IH" else "キー"
-            result[idx + 1] = "" if next_ctx.symbol == "IH" else ""
+            result[idx + 1] = ""
         if current_ctx.symbol == "G" and next_ctx.symbol == "EH":
             result[idx] = "ゲ"
             result[idx + 1] = ""
@@ -581,7 +638,159 @@ def _postprocess(
         elif follower.startswith("シュ"):
             result[next_index] = "ッシュ" + follower[1:]
             result[idx] = ""
-    return result
+
+    idx = 0
+    while idx < len(result) - 1:
+        pair = (result[idx], result[idx + 1])
+        fused = READABLE_CV_FUSIONS.get(pair)
+        if fused:
+            ops.append({"type": "cv_fuse", "at": [idx, idx + 1], "from": [pair[0], pair[1]], "to": fused})
+            result[idx] = fused
+            result[idx + 1] = ""
+            idx += 2
+        else:
+            idx += 1
+
+    result = _apply_r_split(result, contexts, ops, options, disabled_rules)
+    result = _apply_flap_visual(result, contexts, ops, disabled_rules)
+    result = _apply_glottal_suppress(result, contexts, ops, disabled_rules)
+    result = _apply_long_vowel_override(result, contexts, ops, disabled_rules)
+
+    return result, ops
+
+
+def _postprocess_with_ops(
+    tokens: list[str],
+    contexts: Sequence[_PhoneContext],
+    options: KanaConversionOptions,
+    disabled_rules: set[str],
+) -> tuple[list[str], list[dict[str, str | int]]]:
+    processed, ops = _postprocess(tokens[:], contexts, options, disabled_rules)
+    return processed, ops
+
+
+def _apply_r_split(
+    tokens: Sequence[str],
+    contexts: Sequence[_PhoneContext],
+    ops: list[dict[str, str | int]],
+    options: KanaConversionOptions,
+    disabled_rules: set[str],
+) -> list[str]:
+    active = "r_split" not in disabled_rules and not options.r_coloring
+    updated: list[str] = []
+    token_count = len(tokens)
+    for idx, ctx in enumerate(contexts):
+        token = tokens[idx] if idx < token_count else ""
+        new_token = token
+        if active and token and ctx.canonical_symbol in {"ɹ", "r"} and idx > 0:
+            prev_ctx = contexts[idx - 1]
+            prev_vowel = _looks_like_vowel(prev_ctx.canonical_symbol)
+            choice = "ラ" if prev_vowel else "ル"
+            new_token = choice
+            ops.append({"type": "r_split", "at": idx, "choice": choice})
+        elif ctx.canonical_symbol in {"ɹ", "r"} and idx == 0 and not token:
+            new_token = "ル"
+        updated.append(new_token)
+    return updated
+
+
+def _apply_flap_visual(
+    tokens: Sequence[str],
+    contexts: Sequence[_PhoneContext],
+    ops: list[dict[str, str | int]],
+    disabled_rules: set[str],
+) -> list[str]:
+    active = "flap_visual" not in disabled_rules
+    updated: list[str] = []
+    token_count = len(tokens)
+    limit = len(contexts)
+    for idx, ctx in enumerate(contexts):
+        token = tokens[idx] if idx < token_count else ""
+        new_token = token
+        if (
+            active
+            and ctx.canonical_symbol == "ɾ"
+            and idx + 1 < limit
+        ):
+            duration = ctx.duration if ctx.duration is not None else 0.0
+            try:
+                duration_ms = float(duration) * 1000.0
+            except (TypeError, ValueError):
+                duration_ms = 0.0
+            if duration_ms < 80.0:
+                new_token = "ラ"
+                ops.append({"type": "flap_visual", "span": [idx, idx + 1]})
+        updated.append(new_token)
+    return updated
+
+
+def _apply_glottal_suppress(
+    tokens: Sequence[str],
+    contexts: Sequence[_PhoneContext],
+    ops: list[dict[str, str | int]],
+    disabled_rules: set[str],
+) -> list[str]:
+    active = "glottal_suppress" not in disabled_rules
+    updated: list[str] = []
+    token_count = len(tokens)
+    last_index = len(contexts) - 1
+    for idx, ctx in enumerate(contexts):
+        token = tokens[idx] if idx < token_count else ""
+        new_token = token
+        if (
+            active
+            and token
+            and ctx.canonical_symbol == "ʔ"
+            and (idx == 0 or idx == last_index)
+        ):
+            confidence = ctx.confidence if ctx.confidence is not None else 1.0
+            try:
+                conf_value = float(confidence)
+            except (TypeError, ValueError):
+                conf_value = 1.0
+            duration = ctx.duration if ctx.duration is not None else 0.0
+            try:
+                duration_ms = float(duration) * 1000.0
+            except (TypeError, ValueError):
+                duration_ms = 0.0
+            if conf_value < 0.45 and duration_ms < 60.0:
+                new_token = ""
+                ops.append({"type": "glottal_suppress", "at": idx})
+        updated.append(new_token)
+    return updated
+
+
+def _apply_long_vowel_override(
+    tokens: Sequence[str],
+    contexts: Sequence[_PhoneContext],
+    ops: list[dict[str, str | int]],
+    disabled_rules: set[str],
+) -> list[str]:
+    active = "long_vowel" not in disabled_rules
+    updated: list[str] = []
+    token_count = len(tokens)
+    long_map = {"iː": "イー", "uː": "ウー", "ɑː": "アー"}
+    for idx, ctx in enumerate(contexts):
+        token = tokens[idx] if idx < token_count else ""
+        new_token = token
+        mapped = long_map.get(ctx.canonical_symbol)
+        if not active or mapped is None:
+            updated.append(new_token)
+            continue
+        if token == "ー":
+            ops.append({"type": "long_vowel", "at": idx, "value": mapped})
+        elif token != mapped:
+            new_token = mapped
+            ops.append({"type": "long_vowel", "at": idx, "value": mapped})
+        updated.append(new_token)
+    return updated
+
+
+def _parse_disabled_rules() -> set[str]:
+    raw = os.getenv("KANA_DISABLE", "")
+    if not raw:
+        return set()
+    return {entry.strip() for entry in raw.split(",") if entry.strip()}
 
 
 def _next_nonempty_index(
@@ -600,7 +809,7 @@ def _next_nonempty_index(
 
 def _build_text(tokens: Sequence[str], contexts: Sequence[_PhoneContext]) -> str:
     units: list[tuple[str, _PhoneContext | None]] = []
-    for token, ctx in zip(tokens, contexts, strict=True):
+    for token, ctx in zip(tokens, contexts):
         if ctx.is_pause:
             if units and units[-1][0] == "・":
                 continue

@@ -71,6 +71,10 @@ def test_transcribe_phonetic_returns_kana_sequence(monkeypatch) -> None:
         assert response.status_code == 200
         payload = response.json()
         assert payload["kana_text"] == "ニード"
+        assert payload["kana_text_readable"] == "ニード"
+        assert payload["kana_text_strict"] == "ニード"
+        assert payload["kana_ops"]
+        assert "type" in payload["kana_ops"][0]
         assert [item["p"] for item in payload["phones"]] == ["n", "iː", "d"]
         assert payload["params"]["conf_threshold"] == 0.3
         assert payload["params"]["min_phone_ms"] == 40

@@ -72,3 +72,30 @@ def test_unknown_consonant_falls_back_to_sokuon() -> None:
     phones = ["ɣ"]
     result = to_kana_sequence(phones, options=KanaConversionOptions())
     assert result.text == "ッ"
+
+
+def test_glottal_suppression_only_at_boundaries(monkeypatch) -> None:
+    phones = [
+        {"sym": "ʔ", "start": 0.00, "end": 0.04, "conf": 0.3},
+        "AA",
+        {"sym": "ʔ", "start": 0.05, "end": 0.09, "conf": 0.3},
+    ]
+    result = to_kana_sequence(phones, options=KanaConversionOptions())
+    assert result.tokens[0] == ""
+    assert result.tokens[1] != ""
+    assert result.tokens[2] == ""
+    assert any(op.get("type") == "glottal_suppress" for op in result.ops)
+
+
+def test_r_split_applies_after_consonant(monkeypatch) -> None:
+    monkeypatch.delenv("KANA_DISABLE", raising=False)
+    result = to_kana_sequence(["S", "ɹ", "AA"], options=KanaConversionOptions())
+    assert result.tokens[1] == "ル"
+    assert any(op.get("type") == "r_split" for op in result.ops)
+
+
+def test_r_split_can_be_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("KANA_DISABLE", "r_split")
+    result = to_kana_sequence(["AA", "ɹ"], options=KanaConversionOptions())
+    assert not any(op.get("type") == "r_split" for op in result.ops)
+    assert result.tokens[-1] in {"ル", ""}
